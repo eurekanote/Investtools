@@ -252,9 +252,9 @@
             }
         }
  
-        /* ================= 新增：底部切换导航栏与宏观看板专属样式 ================= */
+        /* ================= 新增：方案E 超薄横排底部栏（支持深浅色自动切换） ================= */
         body {
-            padding-bottom: calc(80px + env(safe-area-inset-bottom));
+            padding-bottom: calc(46px + env(safe-area-inset-bottom));
         }
  
         .bottom-tab-bar {
@@ -262,38 +262,52 @@
             bottom: 0;
             left: 0;
             right: 0;
-            height: calc(62px + env(safe-area-inset-bottom));
+            height: calc(42px + env(safe-area-inset-bottom));
             padding-bottom: env(safe-area-inset-bottom);
-            background: rgba(255, 255, 255, 0.88);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
+            background: rgba(255, 255, 255, 0.92);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
             border-top: 1px solid var(--border-color);
             display: flex;
             justify-content: space-around;
             align-items: center;
             z-index: 990;
-            box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.04);
+            transition: background 0.25s ease, border-color 0.25s ease;
         }
+        /* 当切换到宏观看板时，底部导航栏和页面底色自动变为深色，告别突兀白边 */
+        body:has(#view-macro[style*="block"]) {
+            background-color: #030712;
+        }
+        body:has(#view-macro[style*="block"]) .bottom-tab-bar {
+            background: rgba(17, 24, 39, 0.94);
+            border-top: 1px solid #1f2937;
+        }
+
         .tab-item {
-            flex: 1;
             display: flex;
-            flex-direction: column;
+            flex-direction: row; /* 图标与文字改为左右横排，大幅压缩高度 */
             align-items: center;
             justify-content: center;
-            gap: 4px;
-            height: 100%;
+            gap: 6px;
+            padding: 5px 18px;
+            border-radius: 8px;
             color: var(--text-sub);
-            font-size: 11px;
+            font-size: 12px;
             font-weight: 600;
             cursor: pointer;
-            transition: color 0.2s ease;
+            transition: all 0.2s ease;
             user-select: none;
         }
         .tab-item i {
-            font-size: 18px;
+            font-size: 14px;
         }
         .tab-item.active {
             color: var(--apple-blue);
+            background: rgba(0, 122, 255, 0.12);
+        }
+        body:has(#view-macro[style*="block"]) .tab-item.active {
+            color: #60a5fa;
+            background: rgba(59, 130, 246, 0.18);
         }
  
         /* 宏观视图深色卡片容器（保持原 hongguan.html 酷炫深色风格且不污染日历） */
@@ -593,11 +607,11 @@
 <nav class="bottom-tab-bar">
     <div class="tab-item active" id="tab-btn-calendar" onclick="switchAppTab('calendar')">
         <i class="fa-regular fa-calendar-check"></i>
-        <span>开盘与13F日历</span>
+        <span>开盘日历</span>
     </div>
     <div class="tab-item" id="tab-btn-macro" onclick="switchAppTab('macro')">
         <i class="fa-solid fa-chart-pie"></i>
-        <span>宏观经济数据</span>
+        <span>宏观数据</span>
     </div>
 </nav>
 
