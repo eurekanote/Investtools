@@ -571,7 +571,7 @@
     <div id="view-macro">
         <div class="macro-header">
             <div>
-                <div class="macro-title"><i class="fa-solid fa-chart-line" style="margin-right:6px;"></i>宏观追踪器</div>
+                <div class="macro-title"><i class="fa-solid fa-chart-line" style="margin-right:6px;"></i>宏观追踪器2</div>
                 <div class="macro-sub" id="global-update-time">等待官方数据源同步...</div>
             </div>
             <div class="macro-actions">
@@ -750,17 +750,17 @@
 
     function loadInitialData() {
         Object.keys(BACKUP).forEach(m => {
-            // 给兜底预测数据打上 backup 标签
             Object.entries(BACKUP[m]).forEach(([d, obj]) => holidayMaps[m].set(d, { ...obj, source: 'backup' }));
         });
         try {
-            const cached = localStorage.getItem('market_cache_v29'); // 对应v29
+            // 修复原代码 v28 与 v29 名字不一致导致读不到缓存的 Bug
+            const cached = localStorage.getItem('market_cache_v29') || localStorage.getItem('market_cache_v28');
             if (cached) {
                 const r = JSON.parse(cached);
                 Object.keys(r).forEach(m => {
                     Object.entries(r[m]).forEach(([d, obj]) => holidayMaps[m].set(d, obj));
                 });
-                syncStatus.textContent = "已加载历史缓存数据";
+                syncStatus.textContent = "已加载本地日历缓存";
             }
         } catch(e) {}
         updateDataDateUI();
@@ -775,7 +775,6 @@
             if (dMatch && sMatch) {
                 const dateKey = `${dMatch[1].slice(0,4)}-${dMatch[1].slice(4,6)}-${dMatch[1].slice(6,8)}`;
                 const summary = sMatch[1].trim();
-                // 在这里给所有从ICS解析出来的数据打上 sync 官方标签
                 if (market === 'a') {
                     if (summary.includes("上班") || summary.includes("工作日") || summary.includes("补班")) {
                         data.set(dateKey, { type: 'WORK', reason: summary, source: 'sync' });
@@ -796,18 +795,28 @@
         return data;
     }
 
-    async function sync() {
+    async function sync(forceSync = false) {
+        // 如果本地已有官方同步缓存且未满 7 天，直接复用缓存，不抢占宏观数据的中转服务器通道
+        const lastCalSync = Number(localStorage.getItem('market_cache_time_v29') || 0);
+        const hasCache = !!localStorage.getItem('market_cache_v29');
+        if (!forceSync && hasCache && (Date.now() - lastCalSync < 7 * 24 * 3600 * 1000)) {
+            const syncDateStr = new Date(lastCalSync).toLocaleDateString('zh-CN');
+            syncStatus.innerHTML = `已加载日历缓存 (${syncDateStr}) <span onclick="sync(true)" style="color:var(--apple-blue);cursor:pointer;margin-left:4px;">[刷新]</span>`;
+            updateDataDateUI();
+            render();
+            return;
+        }
+
         let anyOk = false;
-        syncStatus.textContent = "检查更新...";
+        syncStatus.textContent = "正在同步日历...";
         for (const [m, u] of Object.entries(ICS_URLS)) {
             let fetchSuccess = false;
             let icsText = "";
 
-            // 多级获取策略：1. 直连 2. AllOrigins代理 3. CorsProxy代理
+            // 去掉必败的直连请求和已失效的 corsproxy.io，复用有效的中转站
             const fetchUrls = [
-                u,
                 `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-                `https://corsproxy.io/?${encodeURIComponent(u)}`
+                `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`
             ];
 
             for (let i = 0; i < fetchUrls.length; i++) {
@@ -816,17 +825,11 @@
                     const r = await fetch(fetchUrls[i], { cache: "no-store" });
                     if (r.ok) {
                         icsText = await r.text();
-                        fetchSuccess = true;
+                        if (icsText.includes('BEGIN:VCALENDAR')) fetchSuccess = true;
                     }
-                } catch (e) {
-                    // 静默失败，继续尝试下一个代理。如果是最后一个也失败，则只输出警告，避免触发红屏报错。
-                    if (i === fetchUrls.length - 1) {
-                        console.warn(`[${m}] 在线数据源及代理均获取失败，将安全回落至本地兜底数据`);
-                    }
-                }
+                } catch (e) {}
             }
 
-            // 解析获取到的内容
             if (fetchSuccess && icsText) {
                 const f = parseICS(icsText, m);
                 if (f.size > 0) {
@@ -840,9 +843,10 @@
             const st = {};
             Object.keys(holidayMaps).forEach(k => st[k] = Object.fromEntries(holidayMaps[k]));
             localStorage.setItem('market_cache_v29', JSON.stringify(st));
-            syncStatus.textContent = `云端同步成功 (${new Date().toLocaleTimeString()})`;
+            localStorage.setItem('market_cache_time_v29', String(Date.now()));
+            syncStatus.innerHTML = `云端同步成功 (${new Date().toLocaleTimeString()})`;
         } else {
-            syncStatus.textContent = "离线运行中 (直连与代理均无法访问)";
+            syncStatus.innerHTML = `使用本地日历数据 <span onclick="sync(true)" style="color:var(--apple-blue);cursor:pointer;margin-left:4px;">[重试]</span>`;
         }
         updateDataDateUI();
         render();
@@ -1230,7 +1234,7 @@
             for (let attempt = 0; attempt < channels.length; attempt++) {
                 const ch = channels[(workerIdx + attempt) % channels.length];
                 const ctrl = new AbortController();
-                const timer = setTimeout(() => ctrl.abort(), 7000);
+                const timer = setTimeout(() => ctrl.abort(), 12000);
                 try {
                     const res = await fetch(ch.url, { signal: ctrl.signal, cache: 'no-store' });
                     clearTimeout(timer);
@@ -1247,7 +1251,7 @@
                 } catch (e) {
                     clearTimeout(timer);
                     // 当前代理失败，等待 250ms 后自动尝试下一个备用代理
-                    await new Promise(r => setTimeout(r, 250));
+                    await new Promise(r => setTimeout(r, 1000));
                 }
             }
             throw new Error('All proxy channels failed');
@@ -1458,6 +1462,7 @@
             for (let i = 0; i < targetList.length; i += batchSize) {
                 const batch = targetList.slice(i, i + batchSize);
                 await Promise.all(batch.map((ind, idx) => fetchSingle(ind, i + idx)));
+                if (i + batchSize < targetList.length) await new Promise(r => setTimeout(r, 1000));
             }
 
             const now = new Date();
@@ -1515,7 +1520,7 @@
                     badgeHtml = `<span class="macro-badge-cache" title="当前展示最近一次成功同步的本地缓存数据">本地缓存</span>`;
                 } else {
                     const fbText = hasKey ? '等待获取(点击重试)' : '待配Key(点击设置)';
-                    const fbAction = hasKey ? 'macroApp.refreshData(true)' : 'macroApp.configureApiKey()';
+                    const fbAction = hasKey ? 'macroApp.refreshData(false, true)' : 'macroApp.configureApiKey()';
                     badgeHtml = `<span class="macro-badge-fallback" onclick="${fbAction}" style="cursor:pointer;" title="点击重新获取数据">${fbText}</span>`;
                 }
 
@@ -1592,6 +1597,13 @@
             });
         }
     };
+    // 打开网页看日历 1.5 秒后，后台自动静默初始化宏观缓存（补齐缺失数据），切过去时直接秒开！
+    setTimeout(() => {
+        if (!macroInitialized) {
+            macroInitialized = true;
+            macroApp.init();
+        }
+    }, 1500);
 
     
 </script>
