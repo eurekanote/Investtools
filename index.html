@@ -1223,18 +1223,22 @@
         },
 
         // 错峰分流请求器：不同指标分配不同起始代理，失败自动切换下一个，避免并发轰炸触发 429 封 IP
-        async fetchJsonWithProxy(targetUrl, workerIdx = 0) {
+        // 智能多通道竞速请求器：每次随机打乱通道 + 双路同时赛跑，绝不死磕同一个卡顿通道
+        async fetchJsonWithProxy(targetUrl) {
+            const cb = Date.now() + Math.floor(Math.random() * 1000);
             const channels = [
-                { url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, wrapped: false },
                 { url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, wrapped: false },
-                { url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, wrapped: true },
-                { url: `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`, wrapped: false }
+                { url: `https://api.cors.lol/?url=${encodeURIComponent(targetUrl)}`, wrapped: false },
+                { url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}&_=${cb}`, wrapped: false },
+                { url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}&_=${cb}`, wrapped: true }
             ];
 
-            for (let attempt = 0; attempt < channels.length; attempt++) {
-                const ch = channels[(workerIdx + attempt) % channels.length];
+            // 每次调用随机打乱通道顺序，防止单独重试某一个指标时永远卡在 0 号通道
+            channels.sort(() => Math.random() - 0.5);
+
+            const tryOne = async (ch) => {
                 const ctrl = new AbortController();
-                const timer = setTimeout(() => ctrl.abort(), 12000);
+                const timer = setTimeout(() => ctrl.abort(), 8000);
                 try {
                     const res = await fetch(ch.url, { signal: ctrl.signal, cache: 'no-store' });
                     clearTimeout(timer);
@@ -1250,21 +1254,28 @@
                     throw new Error('Invalid JSON structure');
                 } catch (e) {
                     clearTimeout(timer);
-                    // 当前代理失败，等待 250ms 后自动尝试下一个备用代理
-                    await new Promise(r => setTimeout(r, 1000));
+                    throw e;
                 }
+            };
+
+            // 先让随机抽出的前 2 个通道同时赛跑（谁先返回用谁），全败再让后 2 个通道同时赛跑
+            try {
+                return await Promise.any([tryOne(channels[0]), tryOne(channels[1])]);
+            } catch (e) {
+                return await Promise.any([tryOne(channels[2]), tryOne(channels[3])]);
             }
-            throw new Error('All proxy channels failed');
         },
 
-        // 从美联储 FRED 获取最新有效观测值
-        async fetchFredSeries(seriesId, units = 'lin', transformFn = v => v, workerIdx = 0) {
+        // 从美联储 FRED 获取最新有效观测值（加入随机 limit 破除代理服务器的错误缓存）
+        async fetchFredSeries(seriesId, units = 'lin', transformFn = v => v) {
             const apiKey = this.getFredKey();
             if (!apiKey || apiKey === 'YOUR_FRED_API_KEY_HERE') {
                 throw new Error('Missing FRED API Key');
             }
-            const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${apiKey}&file_type=json&sort_order=desc&limit=5&units=${units}`;
-            const json = await this.fetchJsonWithProxy(url, workerIdx);
+            // 随机生成 5~15 之间的 limit，既符合美联储接口规范，又能让代理服务器每次视为全新网址
+            const randomLimit = 5 + Math.floor(Math.random() * 11);
+            const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${apiKey}&file_type=json&sort_order=desc&limit=${randomLimit}&units=${units}`;
+            const json = await this.fetchJsonWithProxy(url);
             if (json && Array.isArray(json.observations)) {
                 const validObs = json.observations.find(o => o.value !== '.' && !isNaN(parseFloat(o.value)));
                 if (validObs) {
