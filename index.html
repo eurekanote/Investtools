@@ -754,7 +754,7 @@
             Object.entries(BACKUP[m]).forEach(([d, obj]) => holidayMaps[m].set(d, { ...obj, source: 'backup' }));
         });
         try {
-            const cached = localStorage.getItem('market_cache_v28'); // 对应v28
+            const cached = localStorage.getItem('market_cache_v29'); // 对应v29
             if (cached) {
                 const r = JSON.parse(cached);
                 Object.keys(r).forEach(m => {
@@ -1168,8 +1168,10 @@
 
     const macroApp = {
         dataStore: {},
-        CACHE_KEY: 'macro_official_cache_v4',
+        CACHE_KEY: 'macro_official_cache_v5',
+        SYNC_TIME_KEY: 'macro_last_sync_time_v5',
         KEY_STORAGE: 'macro_fred_api_key_v1',
+        isRefreshing: false,
 
         getFredKey() {
             return (localStorage.getItem(this.KEY_STORAGE) || DEFAULT_FRED_KEY || '').trim();
@@ -1189,8 +1191,20 @@
 
         loadSavedCache() {
             try {
-                const raw = localStorage.getItem(this.CACHE_KEY);
-                return raw ? JSON.parse(raw) : {};
+                // 优先读取 v5 缓存，兼容迁移旧版 v4 缓存
+                const raw = localStorage.getItem(this.CACHE_KEY) || localStorage.getItem('macro_official_cache_v4');
+                if (!raw) return {};
+                const parsed = JSON.parse(raw);
+                const cleanCache = {};
+                Object.keys(parsed).forEach(id => {
+                    const item = parsed[id];
+                    if (!item || typeof item.value !== 'number' || isNaN(item.value)) return;
+                    // 过滤历史错误缓存数据
+                    if (id === 'pmi' && item.value < 30) return;
+                    if (id === 'dxy' && item.value > 115) return;
+                    cleanCache[id] = item;
+                });
+                return cleanCache;
             } catch (e) {
                 return {};
             }
@@ -1204,46 +1218,49 @@
             } catch (e) {}
         },
 
-        // 极速多通道竞速请求器（多个代理同时赛跑，谁先返回用谁，绝不傻等）
-        async fetchJsonWithProxy(targetUrl) {
+        // 错峰分流请求器：不同指标分配不同起始代理，失败自动切换下一个，避免并发轰炸触发 429 封 IP
+        async fetchJsonWithProxy(targetUrl, workerIdx = 0) {
             const channels = [
+                { url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, wrapped: false },
                 { url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, wrapped: false },
                 { url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, wrapped: true },
-                { url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, wrapped: false },
-                { url: `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`, wrapped: false }
+                { url: `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`, wrapped: false }
             ];
 
-            const fetchOne = async (ch) => {
+            for (let attempt = 0; attempt < channels.length; attempt++) {
+                const ch = channels[(workerIdx + attempt) % channels.length];
                 const ctrl = new AbortController();
-                const timer = setTimeout(() => ctrl.abort(), 6500);
+                const timer = setTimeout(() => ctrl.abort(), 7000);
                 try {
                     const res = await fetch(ch.url, { signal: ctrl.signal, cache: 'no-store' });
                     clearTimeout(timer);
                     if (!res.ok) throw new Error('HTTP ' + res.status);
-                    const data = JSON.parse(await res.text());
-                    const finalJson = (ch.wrapped && data.contents) ? JSON.parse(data.contents) : data;
+                    const text = await res.text();
+                    const data = JSON.parse(text);
+                    const finalJson = (ch.wrapped && data.contents)
+                        ? (typeof data.contents === 'string' ? JSON.parse(data.contents) : data.contents)
+                        : data;
                     if (finalJson && (finalJson.observations || finalJson.chart || finalJson.series)) {
                         return finalJson;
                     }
                     throw new Error('Invalid JSON structure');
                 } catch (e) {
                     clearTimeout(timer);
-                    throw e;
+                    // 当前代理失败，等待 250ms 后自动尝试下一个备用代理
+                    await new Promise(r => setTimeout(r, 250));
                 }
-            };
-
-            // Promise.any 让4个通道同时赛跑，只要有1个成功就立刻返回！
-            return await Promise.any(channels.map(ch => fetchOne(ch)));
+            }
+            throw new Error('All proxy channels failed');
         },
 
         // 从美联储 FRED 获取最新有效观测值
-        async fetchFredSeries(seriesId, units = 'lin', transformFn = v => v) {
+        async fetchFredSeries(seriesId, units = 'lin', transformFn = v => v, workerIdx = 0) {
             const apiKey = this.getFredKey();
             if (!apiKey || apiKey === 'YOUR_FRED_API_KEY_HERE') {
                 throw new Error('Missing FRED API Key');
             }
             const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${apiKey}&file_type=json&sort_order=desc&limit=5&units=${units}`;
-            const json = await this.fetchJsonWithProxy(url);
+            const json = await this.fetchJsonWithProxy(url, workerIdx);
             if (json && Array.isArray(json.observations)) {
                 const validObs = json.observations.find(o => o.value !== '.' && !isNaN(parseFloat(o.value)));
                 if (validObs) {
@@ -1258,9 +1275,9 @@
         },
 
         // 从 Yahoo Finance 获取实时行情
-        async fetchYahooQuote(ticker) {
+        async fetchYahooQuote(ticker, workerIdx = 0) {
             const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=5d`;
-            const json = await this.fetchJsonWithProxy(url);
+            const json = await this.fetchJsonWithProxy(url, workerIdx);
             const result = json && json.chart && json.chart.result && json.chart.result[0];
             if (result && result.meta && typeof result.meta.regularMarketPrice === 'number') {
                 const t = result.meta.regularMarketTime
@@ -1274,112 +1291,197 @@
             throw new Error('Invalid Yahoo response');
         },
 
-        // 获取美国制造业景气指数（修复原 10.3 错误数据，改用 FRED 官方校准至 50 枯荣线）
-        async fetchPmiHybrid() {
-            // OECD 美国制造业信心指数正常值在 100 左右（100为枯荣线），除以 2 精准对应 50 枯荣线
-            return await this.fetchFredSeries('BSCICP02USM460S', 'lin', v => Number((v / 2).toFixed(1)));
+        // 获取美国制造业景气指数（优先 DBnomics 官方 ISM 五大分项合成，备用 FRED OECD 净百分比校准）
+        async fetchPmiHybrid(workerIdx = 0) {
+            try {
+                // 通道 1：DBnomics 原生支持跨域直连，无需代理，取 ISM 官方 5 大分项指数均值合成标准 PMI
+                const ismUrl = 'https://api.db.nomics.world/v22/series?observations=1&series_ids=ISM/neword/in,ISM/production/in,ISM/employment/in,ISM/supdel/in,ISM/inventories/in';
+                const ctrl = new AbortController();
+                const timer = setTimeout(() => ctrl.abort(), 5500);
+                const res = await fetch(ismUrl, { signal: ctrl.signal });
+                clearTimeout(timer);
+                if (res.ok) {
+                    const json = await res.json();
+                    const docs = json && json.series && json.series.docs;
+                    if (Array.isArray(docs) && docs.length === 5) {
+                        let sum = 0, latestPeriod = '';
+                        for (const d of docs) {
+                            const vals = d.value || [];
+                            const periods = d.period || [];
+                            const lastVal = parseFloat(vals[vals.length - 1]);
+                            if (isNaN(lastVal) || lastVal < 25 || lastVal > 80) throw new Error('Outlier');
+                            sum += lastVal;
+                            latestPeriod = periods[periods.length - 1] || latestPeriod;
+                        }
+                        return { value: Number((sum / 5).toFixed(1)), obsDate: latestPeriod };
+                    }
+                }
+            } catch (e) {}
+
+            // 通道 2：FRED 官方 OECD 制造业信心指数（自动识别净百分比 0 枯荣线或 100 枯荣线，精准转换至 50 枯荣线）
+            return await this.fetchFredSeries('BSCICP02USM460S', 'lin', v => {
+                const calibrated = Math.abs(v) < 55 ? (50 + v / 2) : (v / 2);
+                return Number(calibrated.toFixed(1));
+            }, workerIdx);
         },
 
+        // 初始化：有缓存直接秒看本地缓存，不自动转圈等待；没缓存才自动请求 API；绝不显示无效假数据
         init() {
             const savedCache = this.loadSavedCache();
+            let cachedCount = 0;
+
             indicatorsConfig.forEach(ind => {
-                const cached = savedCache[ind.id];
-                // 自动过滤掉之前错误的 10.3 PMI 缓存和 121 美元缓存
-                const isBadCache = (ind.id === 'pmi' && cached && cached.value < 30) || (ind.id === 'dxy' && cached && cached.value > 112);
-                const validCache = (!isBadCache && cached) ? cached : null;
-                const val = validCache ? validCache.value : ind.baselineValue;
-                const status = ind.ranges.find(r => val >= r.min && val <= r.max) || ind.ranges[1];
-                this.dataStore[ind.id] = {
-                    value: val,
-                    status: status,
-                    obsDate: validCache ? validCache.obsDate : ind.baselineDate,
-                    sourceMode: validCache ? 'cache' : 'fallback'
-                };
+                const validCache = savedCache[ind.id];
+                if (validCache) {
+                    cachedCount++;
+                    const val = validCache.value;
+                    const status = ind.ranges.find(r => val >= r.min && val <= r.max) || ind.ranges[1];
+                    this.dataStore[ind.id] = {
+                        value: val,
+                        status: status,
+                        obsDate: validCache.obsDate,
+                        sourceMode: 'cache'
+                    };
+                } else {
+                    // 既无缓存也未同步时，显示“等待获取数据”，绝不显示无效的基准参考假数据
+                    this.dataStore[ind.id] = {
+                        value: null,
+                        status: null,
+                        obsDate: '等待获取数据',
+                        sourceMode: 'waiting'
+                    };
+                }
             });
+
             this.renderCards();
-            this.refreshData(false);
+
+            const statusEl = document.getElementById('global-update-time');
+            const lastSyncTime = localStorage.getItem(this.SYNC_TIME_KEY) || '历史记录';
+
+            if (cachedCount === indicatorsConfig.length) {
+                // 全部都有本地缓存：直接秒开看缓存，不联网等待！需要更新时用户手动点右上角刷新
+                statusEl.innerText = `已加载本地缓存 (上次同步: ${lastSyncTime}) · 点击右侧 🔄 可刷新最新数据`;
+            } else if (cachedCount > 0) {
+                // 只有部分缓存：先显示已有的缓存，后台仅自动补齐缺失的那几个指标
+                statusEl.innerText = `已加载 ${cachedCount}/${indicatorsConfig.length} 项缓存，正在自动同步缺失数据...`;
+                this.refreshData(false, true);
+            } else {
+                // 第一次打开完全没缓存：自动调用 API 同步全部数据
+                this.refreshData(false, false);
+            }
         },
 
-        async refreshData(isManual = false) {
+        // 刷新数据：isManual=true 为点击刷新按钮（刷新全部），onlyMissing=true 为仅补齐缺失缓存的指标
+        async refreshData(isManual = false, onlyMissing = false) {
+            if (this.isRefreshing) return;
+            this.isRefreshing = true;
+
             const icon = document.getElementById('refresh-icon');
             if (icon) icon.classList.add('macro-spin');
             const statusEl = document.getElementById('global-update-time');
             const hasKey = !!this.getFredKey();
             const savedCache = this.loadSavedCache();
+
+            const targetList = onlyMissing
+                ? indicatorsConfig.filter(ind => !savedCache[ind.id])
+                : indicatorsConfig;
+
             let doneCount = 0;
+            let successCount = 0;
 
-            statusEl.innerText = `正在极速同步官方数据 (0/${indicatorsConfig.length})...`;
+            statusEl.innerText = `正在从官方源同步数据 (0/${targetList.length})...`;
 
-            // 单个指标抓取并立刻更新UI的函数
-            const fetchSingle = async (ind) => {
+            const fetchSingle = async (ind, workerIdx) => {
                 let fetched = null;
                 try {
                     if (ind.sourceType === 'fred') {
-                        fetched = await this.fetchFredSeries(ind.ticker, ind.fredUnits, ind.transform);
+                        fetched = await this.fetchFredSeries(ind.ticker, ind.fredUnits, ind.transform, workerIdx);
                     } else if (ind.sourceType === 'pmi_hybrid') {
-                        fetched = await this.fetchPmiHybrid();
+                        fetched = await this.fetchPmiHybrid(workerIdx);
                     } else if (ind.sourceType === 'market') {
-                        try {
-                            fetched = await this.fetchYahooQuote(ind.ticker);
-                        } catch (yahooErr) {
-                            if (ind.fredBackupTicker && this.getFredKey()) {
-                                fetched = await this.fetchFredSeries(ind.fredBackupTicker, 'lin', ind.fredTransform || (v => v));
-                            } else {
-                                throw yahooErr;
+                        // 市场指标优先用稳定的 FRED 官方日频数据（若已配Key），失败再试 Yahoo 实时接口，双重互备
+                        if (ind.fredBackupTicker && hasKey) {
+                            try {
+                                fetched = await this.fetchFredSeries(ind.fredBackupTicker, 'lin', ind.fredTransform || (v => v), workerIdx);
+                            } catch (fredErr) {
+                                fetched = await this.fetchYahooQuote(ind.ticker, workerIdx);
                             }
+                        } else {
+                            fetched = await this.fetchYahooQuote(ind.ticker, workerIdx);
                         }
                     }
                 } catch (err) {
                     fetched = null;
                 }
 
-                const cached = savedCache[ind.id];
-                const isBadCache = (ind.id === 'pmi' && cached && cached.value < 30) || (ind.id === 'dxy' && cached && cached.value > 112);
-                const validCache = (!isBadCache && cached) ? cached : null;
+                const validCache = savedCache[ind.id];
 
-                let finalVal, finalDate, mode;
                 if (fetched && typeof fetched.value === 'number' && !isNaN(fetched.value)) {
-                    finalVal = fetched.value;
-                    finalDate = fetched.obsDate;
-                    mode = 'real';
+                    successCount++;
+                    const finalVal = fetched.value;
+                    const finalDate = fetched.obsDate;
                     this.saveToCache(ind.id, finalVal, finalDate);
+                    const currentStatus = ind.ranges.find(r => finalVal >= r.min && finalVal <= r.max) || ind.ranges[1];
+                    this.dataStore[ind.id] = {
+                        value: finalVal,
+                        status: currentStatus,
+                        obsDate: finalDate,
+                        sourceMode: 'real'
+                    };
                 } else if (validCache) {
-                    finalVal = validCache.value;
-                    finalDate = validCache.obsDate;
-                    mode = 'cache';
+                    // 本次刷新若网络超时，保留展示上次成功的真实缓存，绝不退回假数据
+                    const finalVal = validCache.value;
+                    const currentStatus = ind.ranges.find(r => finalVal >= r.min && finalVal <= r.max) || ind.ranges[1];
+                    this.dataStore[ind.id] = {
+                        value: finalVal,
+                        status: currentStatus,
+                        obsDate: validCache.obsDate,
+                        sourceMode: 'cache'
+                    };
                 } else {
-                    finalVal = ind.baselineValue;
-                    finalDate = ind.baselineDate;
-                    mode = 'fallback';
+                    // 既没抓到 API、本地也没缓存：诚实显示等待获取数据
+                    this.dataStore[ind.id] = {
+                        value: null,
+                        status: null,
+                        obsDate: '等待获取数据',
+                        sourceMode: 'waiting'
+                    };
                 }
 
-                const currentStatus = ind.ranges.find(r => finalVal >= r.min && finalVal <= r.max) || ind.ranges[1];
-                this.dataStore[ind.id] = {
-                    value: finalVal,
-                    status: currentStatus,
-                    obsDate: finalDate,
-                    sourceMode: mode
-                };
-
                 doneCount++;
-                statusEl.innerText = `正在极速同步官方数据 (${doneCount}/${indicatorsConfig.length})...`;
-                this.renderCards(); // 抓到一个就立刻渲染一个，不再干等！
+                statusEl.innerText = `正在从官方源同步数据 (${doneCount}/${targetList.length})...`;
+                this.renderCards();
             };
 
-            // 分成3个一组微批次并发，既快又不会被免费代理封IP
-            const batchSize = 3;
-            for (let i = 0; i < indicatorsConfig.length; i += batchSize) {
-                const batch = indicatorsConfig.slice(i, i + batchSize);
-                await Promise.all(batch.map(ind => fetchSingle(ind)));
+            // 每次并发 2 个，错峰温柔请求，彻底杜绝代理封 IP
+            const batchSize = 2;
+            for (let i = 0; i < targetList.length; i += batchSize) {
+                const batch = targetList.slice(i, i + batchSize);
+                await Promise.all(batch.map((ind, idx) => fetchSingle(ind, i + idx)));
             }
 
             const now = new Date();
             const timeStr = `${now.getMonth() + 1}月${now.getDate()}日 ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-            statusEl.innerText = hasKey
-                ? `最后同步: ${timeStr} (FRED官方源已激活)`
-                : `最后同步: ${timeStr} (点击右上角🔑配置FRED Key解锁全部官方源)`;
+
+            if (successCount > 0) {
+                localStorage.setItem(this.SYNC_TIME_KEY, timeStr);
+            }
+
+            if (!hasKey) {
+                statusEl.innerText = `未配置 FRED Key · 请点击右上角 🔑 按钮输入 Key 后重试`;
+            } else if (successCount === targetList.length) {
+                statusEl.innerText = `最后同步: ${timeStr} (全部 ${successCount}/${targetList.length} 项官方数据同步成功)`;
+            } else if (successCount > 0) {
+                statusEl.innerText = `最后同步: ${timeStr} (本次成功 ${successCount}/${targetList.length} 项，其余展示缓存或待重试)`;
+            } else {
+                const cachedTotal = Object.keys(this.loadSavedCache()).length;
+                statusEl.innerText = cachedTotal > 0
+                    ? `网络代理繁忙，当前展示本地缓存数据 · 可稍后点击 🔄 重试`
+                    : `同步失败: 免费跨域代理繁忙，请点击右侧 🔄 重新获取`;
+            }
 
             if (icon) icon.classList.remove('macro-spin');
+            this.isRefreshing = false;
         },
 
         toggleAccordion(id) {
@@ -1400,23 +1502,25 @@
             if (!container) return;
             container.innerHTML = '';
 
+            const hasKey = !!this.getFredKey();
+
             indicatorsConfig.forEach(ind => {
-                const data = this.dataStore[ind.id];
+                const data = this.dataStore[ind.id] || { value: null, status: null, obsDate: '等待获取数据', sourceMode: 'waiting' };
+                const hasValidData = (data.value !== null && typeof data.value === 'number' && !isNaN(data.value));
 
                 let badgeHtml = '';
-                const hasKey = !!this.getFredKey();
                 if (data.sourceMode === 'real') {
                     badgeHtml = `<span class="macro-badge-real">官方实时</span>`;
                 } else if (data.sourceMode === 'cache') {
-                    badgeHtml = `<span class="macro-badge-cache" title="当前展示最近一次成功同步的官方真实数据">真实缓存</span>`;
+                    badgeHtml = `<span class="macro-badge-cache" title="当前展示最近一次成功同步的本地缓存数据">本地缓存</span>`;
                 } else {
-                    const fbText = hasKey ? '基准参考(点击重试)' : '待配Key/基准';
+                    const fbText = hasKey ? '等待获取(点击重试)' : '待配Key(点击设置)';
                     const fbAction = hasKey ? 'macroApp.refreshData(true)' : 'macroApp.configureApiKey()';
-                    badgeHtml = `<span class="macro-badge-fallback" onclick="${fbAction}" style="cursor:pointer;" title="点击重新同步或配置Key">${fbText}</span>`;
+                    badgeHtml = `<span class="macro-badge-fallback" onclick="${fbAction}" style="cursor:pointer;" title="点击重新获取数据">${fbText}</span>`;
                 }
 
                 const rangesHtml = ind.ranges.map(r => {
-                    const isCurrent = data.status.label === r.label;
+                    const isCurrent = hasValidData && data.status && data.status.label === r.label;
                     let rangeText = '';
                     if (r.min === -Infinity) rangeText = `< ${r.max}`;
                     else if (r.max === Infinity) rangeText = `> ${r.min}`;
@@ -1435,6 +1539,20 @@
                     `;
                 }).join('');
 
+                const valDisplayHtml = hasValidData
+                    ? `${data.value}<span class="macro-val-unit">${ind.unit}</span>`
+                    : `<span style="font-size:15px; color:#6b7280; font-weight:600;">等待获取数据</span>`;
+
+                const statusPillHtml = (hasValidData && data.status)
+                    ? `<span class="macro-status-pill ${data.status.tone}">
+                           <span class="macro-status-dot"></span>
+                           研判：${data.status.label}
+                       </span>`
+                    : `<span class="macro-status-pill" style="background:rgba(55,65,81,0.4); color:#9ca3af; border-color:#374151;">
+                           <span class="macro-status-dot"></span>
+                           等待获取数据...
+                       </span>`;
+
                 const cardHtml = `
                     <div class="macro-card">
                         <div>
@@ -1444,16 +1562,13 @@
                                     <div class="macro-source-meta"><i class="fa-solid fa-satellite-dish"></i> 源: ${ind.source} | ${ind.ticker}</div>
                                 </div>
                                 <div class="macro-val-box">
-                                    <div class="macro-val-num">${data.value}<span class="macro-val-unit">${ind.unit}</span></div>
+                                    <div class="macro-val-num">${valDisplayHtml}</div>
                                     <div class="macro-obs-date">数据期: ${data.obsDate}</div>
                                 </div>
                             </div>
 
                             <div class="macro-bar-row" onclick="macroApp.toggleAccordion('${ind.id}')">
-                                <span class="macro-status-pill ${data.status.tone}">
-                                    <span class="macro-status-dot"></span>
-                                    研判：${data.status.label}
-                                </span>
+                                ${statusPillHtml}
                                 <div class="macro-expand-btn">
                                     <span>展开说明</span>
                                     <span id="macro-icon-${ind.id}" style="display:inline-block; transition:transform 0.3s ease; font-size:12px; font-weight:bold; line-height:1;">↓</span>
@@ -1477,6 +1592,8 @@
             });
         }
     };
+
+    
 </script>
 
 <!-- 
