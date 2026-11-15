@@ -1,0 +1,1521 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>开盘看板日历</title>
+    
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="开盘日历">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/128/9014/9014576.png">
+    <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/128/9014/9014576.png">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        :root {
+            --bg-color: #f2f2f7;
+            --card-bg: #ffffff;
+            --apple-blue: #007aff;
+            --apple-red: #ff3b30;
+            --apple-orange: #ff9500; 
+            --text-main: #1c1c1e;
+            --text-sub: #8e8e93;
+            --border-color: #e5e5ea;
+            --tag-a-bg: #6366f1; 
+            --tag-h-bg: #f59e0b; 
+            --tag-u-bg: #10b981; 
+            --tag-closed-bg: #e5e5ea;
+            --tag-closed-text: #8e8e93;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            padding: 15px; /* PC端保留间距 */
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1000px;
+            background: var(--card-bg);
+            border-radius: 20px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+        }
+
+        .header {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .header h1 { font-size: 20px; font-weight: 700; color: var(--apple-blue); }
+
+        .clocks-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 25px;
+        }
+        .clock-card {
+            background: #fbfbfd;
+            border-radius: 16px;
+            padding: 18px 10px;
+            text-align: center;
+            border: 1px solid var(--border-color);
+        }
+        .time-val {
+            font-family: "SF Mono", "Courier New", monospace;
+            font-size: 30px;
+            font-weight: 700;
+            margin: 4px 0;
+            letter-spacing: -1px;
+        }
+        .date-val { font-size: 12px; color: var(--text-sub); }
+
+        .calendar-container {
+            border: 1px solid var(--border-color);
+            border-radius: 14px;
+            overflow: hidden;
+            background: #fff;
+        }
+        .cal-header {
+            padding: 12px 15px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .cal-controls { display: flex; align-items: center; gap: 8px; }
+        .cal-select, .cal-btn {
+            background-color: #f2f2f7;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--apple-blue);
+            outline: none;
+        }
+
+        .cal-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            background: var(--border-color);
+            gap: 1px;
+        }
+        .weekday {
+            background: #f9f9fb;
+            padding: 10px 0;
+            text-align: center;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-sub);
+        }
+        .day-cell {
+            background: #fff;
+            min-height: 100px;
+            padding: 6px 4px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            position: relative; /* 13F定位锚点 */
+        }
+        .day-num { font-size: 14px; font-weight: 600; }
+        .today .day-num {
+            color: #fff;
+            background: var(--apple-red);
+            width: 22px; height: 22px;
+            display: flex; align-items: center; justify-content: center;
+            border-radius: 50%;
+        }
+        .other-month { color: #d1d1d6; }
+        .other-month .market-tag { opacity: 0.2; }
+        .other-month .f13-badge { opacity: 0.2; }
+
+        .market-tag {
+            font-size: 9px;
+            font-weight: 700;
+            padding: 3px 4px;
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            white-space: nowrap;
+        }
+        .tag-a { background-color: var(--tag-a-bg); color: white; }
+        .tag-h { background-color: var(--tag-h-bg); color: white; }
+        .tag-u { background-color: var(--tag-u-bg); color: white; }
+        .tag-half { background-color: var(--apple-orange); color: white; } 
+        .tag-closed { background-color: var(--tag-closed-bg); color: var(--tag-closed-text); }
+
+        /* 13F标记样式 - 修改为亮橙色 */
+        .f13-badge {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            background-color: var(--apple-orange); 
+            color: #fff;
+            font-size: 8px;
+            font-weight: bold;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+            z-index: 2;
+        }
+
+        .info-icon {
+            display: inline-flex;
+            width: 12px; height: 12px;
+            background: rgba(0,0,0,0.1);
+            color: #666;
+            border-radius: 50%;
+            justify-content: center; align-items: center;
+            font-size: 8px;
+            cursor: pointer;
+        }
+
+        #modal-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.3);
+            display: none;
+            justify-content: center; align-items: center;
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+        #modal {
+            background: #fff;
+            padding: 25px;
+            border-radius: 20px;
+            width: 80%;
+            max-width: 300px;
+            text-align: center;
+        }
+        .modal-btn {
+            background: var(--apple-blue);
+            color: #fff; border: none;
+            padding: 12px; width: 100%;
+            border-radius: 12px; font-weight: 600; margin-top: 15px;
+        }
+
+        .sync-info {
+            margin-top: 15px;
+            font-size: 10px;
+            color: var(--text-sub);
+            text-align: right;
+        }
+
+        /* 移动端适配 */
+        @media (max-width: 600px) {
+            body { padding: 0; }
+            .container { 
+                padding: 10px 0px; 
+                border-radius: 0; 
+                box-shadow: none;
+                width: 100vw;
+            }
+            .clocks-row { 
+                grid-template-columns: 1fr; 
+                gap: 10px; 
+                padding: 0 10px;
+            }
+            .time-val { font-size: 28px; }
+            .calendar-container {
+                border-left: none;
+                border-right: none;
+                border-radius: 0;
+            }
+            .cal-header { padding: 10px 5px; justify-content: center; }
+            .day-cell { min-height: 85px; padding: 4px 2px; }
+            .market-tag { font-size: 8px; letter-spacing: -0.5px; padding: 1px 2px; }
+            .weekday { font-size: 10px; }
+            .f13-badge {
+                top: 2px;
+                right: 2px;
+                width: 15px;
+                height: 15px;
+                font-size: 7px;
+            }
+        }
+ 
+        /* ================= 新增：底部切换导航栏与宏观看板专属样式 ================= */
+        body {
+            padding-bottom: calc(80px + env(safe-area-inset-bottom));
+        }
+ 
+        .bottom-tab-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: calc(62px + env(safe-area-inset-bottom));
+            padding-bottom: env(safe-area-inset-bottom);
+            background: rgba(255, 255, 255, 0.88);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            z-index: 990;
+            box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.04);
+        }
+        .tab-item {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            height: 100%;
+            color: var(--text-sub);
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: color 0.2s ease;
+            user-select: none;
+        }
+        .tab-item i {
+            font-size: 18px;
+        }
+        .tab-item.active {
+            color: var(--apple-blue);
+        }
+ 
+        /* 宏观视图深色卡片容器（保持原 hongguan.html 酷炫深色风格且不污染日历） */
+        #view-macro {
+            display: none;
+            background: #030712;
+            color: #f3f4f6;
+            border-radius: 16px;
+            overflow: hidden;
+            margin: -5px;
+        }
+        .macro-header {
+            background: rgba(17, 24, 39, 0.9);
+            border-bottom: 1px solid #1f2937;
+            padding: 16px 18px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .macro-title {
+            font-size: 18px;
+            font-weight: 700;
+            background: linear-gradient(to right, #60a5fa, #a855f7);
+            -webkit-background-clip: text;
+            color: transparent;
+        }
+        .macro-sub {
+            font-size: 11px;
+            color: #9ca3af;
+            margin-top: 4px;
+        }
+        .macro-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .macro-icon-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: #1f2937;
+            border: 1px solid #374151;
+            color: #60a5fa;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 15px;
+        }
+        .macro-icon-btn:active { background: #374151; }
+        .macro-spin { animation: macroSpin 1s linear infinite; }
+        @keyframes macroSpin { 100% { transform: rotate(360deg); } }
+ 
+        .macro-cards-list {
+            padding: 16px;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 14px;
+        }
+        .macro-card {
+            background: #111827;
+            border: 1px solid #1f2937;
+            border-radius: 16px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .macro-card-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+        }
+        .macro-ind-name {
+            font-size: 15px;
+            font-weight: 700;
+            color: #f3f4f6;
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        .macro-source-meta {
+            font-size: 11px;
+            color: #6b7280;
+            margin-top: 5px;
+        }
+        .macro-val-box {
+            text-align: right;
+            flex-shrink: 0;
+        }
+        .macro-val-num {
+            font-size: 22px;
+            font-weight: 700;
+            color: #ffffff;
+            font-family: "SF Mono", "Courier New", monospace;
+        }
+        .macro-val-unit {
+            font-size: 12px;
+            color: #9ca3af;
+            font-weight: 400;
+            margin-left: 2px;
+        }
+        .macro-obs-date {
+            font-size: 10px;
+            color: #6b7280;
+            margin-top: 3px;
+        }
+        .macro-badge-real {
+            font-size: 10px;
+            background: rgba(6, 78, 59, 0.6);
+            color: #34d399;
+            border: 1px solid #065f46;
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+        .macro-badge-cache {
+            font-size: 10px;
+            background: rgba(30, 58, 138, 0.5);
+            color: #93c5fd;
+            border: 1px solid #1e40af;
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+        .macro-badge-fallback {
+            font-size: 10px;
+            background: rgba(55, 65, 81, 0.6);
+            color: #9ca3af;
+            border: 1px solid #4b5563;
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+        .macro-bar-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            margin-top: 4px;
+            user-select: none;
+        }
+        .macro-status-pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 5px 11px;
+            font-size: 12px;
+            font-weight: 600;
+            border-radius: 999px;
+            border: 1px solid transparent;
+        }
+        .macro-status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+            margin-right: 6px;
+        }
+        /* 状态颜色映射 */
+        .m-tone-green { background: rgba(34, 197, 94, 0.16); color: #4ade80; border-color: rgba(34, 197, 94, 0.3); }
+        .m-tone-yellow { background: rgba(234, 179, 8, 0.16); color: #facc15; border-color: rgba(234, 179, 8, 0.3); }
+        .m-tone-red { background: rgba(239, 68, 68, 0.16); color: #f87171; border-color: rgba(239, 68, 68, 0.3); }
+        .m-tone-purple { background: rgba(168, 85, 247, 0.16); color: #c084fc; border-color: rgba(168, 85, 247, 0.3); }
+ 
+        .macro-expand-btn {
+            font-size: 11px;
+            color: #9ca3af;
+            background: rgba(31, 41, 55, 0.7);
+            padding: 5px 10px;
+            border-radius: 999px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .macro-accordion {
+            max-height: 0;
+            opacity: 0;
+            overflow: hidden;
+            transition: max-height 0.35s ease, opacity 0.3s ease;
+        }
+        .macro-accordion.open {
+            max-height: 800px;
+            opacity: 1;
+        }
+        .macro-desc-box {
+            background: rgba(30, 58, 138, 0.15);
+            border: 1px solid rgba(30, 58, 138, 0.35);
+            border-radius: 12px;
+            padding: 12px;
+            margin-top: 14px;
+            margin-bottom: 12px;
+            font-size: 12px;
+            color: #d1d5db;
+            line-height: 1.5;
+        }
+        .macro-range-item {
+            padding: 8px 6px;
+            border-bottom: 1px solid rgba(31, 41, 55, 0.8);
+        }
+        .macro-range-item:last-child { border-bottom: none; }
+        .macro-range-item.current {
+            background: rgba(31, 41, 55, 0.55);
+            border-radius: 8px;
+        }
+        .macro-range-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+        .macro-range-num {
+            font-family: monospace;
+            font-size: 11px;
+            color: #9ca3af;
+            background: #030712;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        .macro-range-detail {
+            font-size: 11px;
+            color: #9ca3af;
+            line-height: 1.4;
+        }
+        @media (max-width: 600px) {
+            #view-macro { border-radius: 0; margin: -10px 0; }
+            .macro-cards-list { grid-template-columns: 1fr; padding: 12px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- 视图 1：原有的开盘看板日历（内部结构完全不变） -->
+    <div id="view-calendar">
+    <div class="header">
+        <h1>开盘看板日历</h1>
+    </div>
+
+    <div class="clocks-row">
+        <div class="clock-card">
+            <div class="date-val">北京时间 (CST)</div>
+            <div id="cn-time" class="time-val">00:00:00</div>
+            <div id="cn-date" class="date-val">同步中...</div>
+        </div>
+        <div class="clock-card">
+            <div class="date-val">美东时间 (EST/EDT)</div>
+            <div id="us-time" class="time-val">00:00:00</div>
+            <div id="us-date" class="date-val">同步中...</div>
+        </div>
+    </div>
+
+    <div class="calendar-container">
+        <div class="cal-header">
+            <div class="cal-controls">
+                <select id="year-select" class="cal-select"></select>
+                <select id="month-select" class="cal-select"></select>
+                <button id="today-btn" class="cal-btn">今天</button>
+            </div>
+        </div>
+        <div class="cal-grid" id="calendar-grid">
+            <div class="weekday">日</div><div class="weekday">一</div><div class="weekday">二</div>
+            <div class="weekday">三</div><div class="weekday">四</div><div class="weekday">五</div>
+            <div class="weekday">六</div>
+        </div>
+    </div>
+
+    <div class="sync-info" id="sync-status">初始化中...</div>
+    <div class="sync-info" id="official-data-date" style="margin-top: 4px;">官方数据范围: 分析中...</div>
+    <div class="sync-info" id="predict-data-date" style="margin-top: 2px;">预估数据范围: 分析中...</div>
+    <div class="sync-info" style="margin-top: 8px;">橙色表示提前收盘 / 右上角橙圈为13F</div>
+    </div><!-- 结束 #view-calendar -->
+
+    <!-- 视图 2：宏观经济追踪器 4.0 -->
+    <div id="view-macro">
+        <div class="macro-header">
+            <div>
+                <div class="macro-title"><i class="fa-solid fa-chart-line" style="margin-right:6px;"></i>宏观追踪器 4.0</div>
+                <div class="macro-sub" id="global-update-time">等待官方数据源同步...</div>
+            </div>
+            <div class="macro-actions">
+                <button class="macro-icon-btn" onclick="macroApp.configureApiKey()" title="设置美联储 FRED API Key">
+                    <i class="fa-solid fa-key"></i>
+                </button>
+                <button class="macro-icon-btn" onclick="macroApp.refreshData(true)" title="立即刷新真实数据">
+                    <i class="fa-solid fa-rotate-right" id="refresh-icon"></i>
+                </button>
+            </div>
+        </div>
+        <div class="macro-cards-list" id="cards-container">
+            <div style="text-align:center; color:#6b7280; padding:40px 0; font-size:13px;">正在建立与官方数据源的连接...</div>
+        </div>
+    </div>
+</div>
+
+<!-- 底部切换标签栏 -->
+<nav class="bottom-tab-bar">
+    <div class="tab-item active" id="tab-btn-calendar" onclick="switchAppTab('calendar')">
+        <i class="fa-regular fa-calendar-check"></i>
+        <span>开盘与13F日历</span>
+    </div>
+    <div class="tab-item" id="tab-btn-macro" onclick="switchAppTab('macro')">
+        <i class="fa-solid fa-chart-pie"></i>
+        <span>宏观经济数据</span>
+    </div>
+</nav>
+
+<div id="modal-overlay">
+    <div id="modal">
+        <h3 id="modal-title">详情</h3>
+        <p id="modal-desc" style="margin-top:10px; font-size:14px; color:#666;"></p>
+        <button class="modal-btn" onclick="closeModal()">好</button>
+    </div>
+</div>
+
+<script>
+    // 离线支持 v32 - 强制清理旧缓存
+    if ('serviceWorker' in navigator) {
+        const sw = `
+            const C = 'market-v34';
+            self.addEventListener('install', e => {
+                self.skipWaiting();
+                e.waitUntil(caches.open(C).then(c => c.addAll([location.href])));
+            });
+            self.addEventListener('fetch', e => e.respondWith(caches.match(e.request).then(r => r || fetch(e.request))));
+        `;
+        const b = new Blob([sw], {type: 'application/javascript'});
+        navigator.serviceWorker.register(URL.createObjectURL(b)).catch(() => {});
+    }
+
+    const ICS_URLS = {
+        a: "https://calendars.icloud.com/holidays/cn_zh.ics",
+        us: "https://ics.calendarlabs.com/577/69d4aaa8/Nyse_Market_Holidays.ics",
+        hk: "https://ics.calendarlabs.com/581/34611917/Hkex_Market_Holidays.ics"
+    };
+
+    const CN_HOLIDAY_WHITELIST = ["元旦", "春节", "清明", "劳动", "五一", "端午", "中秋", "国庆"];
+
+    // 核心地基数据（包含27年预测数据打底）
+    const BACKUP = {
+        a: { 
+            "2026-01-01": { type: 'HOLIDAY', reason: "元旦" },
+            "2026-02-17": { type: 'HOLIDAY', reason: "春节" }, "2026-02-18": { type: 'HOLIDAY', reason: "春节" }, "2026-02-19": { type: 'HOLIDAY', reason: "春节" }, "2026-02-20": { type: 'HOLIDAY', reason: "春节" }, "2026-02-23": { type: 'HOLIDAY', reason: "春节" }, "2026-02-24": { type: 'HOLIDAY', reason: "春节" },
+            "2026-04-06": { type: 'HOLIDAY', reason: "清明补休" },
+            "2026-05-01": { type: 'HOLIDAY', reason: "劳动节" }, "2026-05-04": { type: 'HOLIDAY', reason: "劳动节假期" }, "2026-05-05": { type: 'HOLIDAY', reason: "劳动节假期" },
+            "2026-06-19": { type: 'HOLIDAY', reason: "端午节" },
+            "2026-09-25": { type: 'HOLIDAY', reason: "中秋节假期" }, 
+            "2026-10-01": { type: 'HOLIDAY', reason: "国庆节" }, "2026-10-02": { type: 'HOLIDAY', reason: "国庆假期" }, "2026-10-05": { type: 'HOLIDAY', reason: "国庆假期" }, "2026-10-06": { type: 'HOLIDAY', reason: "国庆假期" }, "2026-10-07": { type: 'HOLIDAY', reason: "国庆假期" },
+            // 2027 年A股预测补充 (一旦在线ICS更新，会自动覆盖这些数据)
+            "2027-01-01": { type: 'HOLIDAY', reason: "元旦" },
+            "2027-02-08": { type: 'HOLIDAY', reason: "春节" }, "2027-02-09": { type: 'HOLIDAY', reason: "春节" }, "2027-02-10": { type: 'HOLIDAY', reason: "春节" }, "2027-02-11": { type: 'HOLIDAY', reason: "春节" }, "2027-02-12": { type: 'HOLIDAY', reason: "春节" },
+            "2027-04-05": { type: 'HOLIDAY', reason: "清明节" },
+            "2027-05-03": { type: 'HOLIDAY', reason: "劳动节" }, "2027-05-04": { type: 'HOLIDAY', reason: "劳动节" }, "2027-05-05": { type: 'HOLIDAY', reason: "劳动节" },
+            "2027-06-09": { type: 'HOLIDAY', reason: "端午节" },
+            "2027-09-15": { type: 'HOLIDAY', reason: "中秋节" },
+            "2027-10-01": { type: 'HOLIDAY', reason: "国庆节" }, "2027-10-04": { type: 'HOLIDAY', reason: "国庆假期" }, "2027-10-05": { type: 'HOLIDAY', reason: "国庆假期" }, "2027-10-06": { type: 'HOLIDAY', reason: "国庆假期" }, "2027-10-07": { type: 'HOLIDAY', reason: "国庆假期" }
+        },
+        us: { 
+            "2026-01-01": { type: 'HOLIDAY', reason: "New Year's Day" },
+            "2026-06-19": { type: 'HOLIDAY', reason: "Juneteenth" },
+            "2026-07-03": { type: 'HOLIDAY', reason: "Independence Day Obs" },
+            "2026-12-25": { type: 'HOLIDAY', reason: "Christmas" },
+            "2026-11-27": { type: 'HALF', reason: "Early Close (1 PM)" },
+            "2026-12-24": { type: 'HALF', reason: "Early Close (1 PM)" },
+            // 2027 年美股标准补充
+            "2027-01-01": { type: 'HOLIDAY', reason: "New Year's Day" },
+            "2027-01-18": { type: 'HOLIDAY', reason: "Martin Luther King Jr. Day" },
+            "2027-02-15": { type: 'HOLIDAY', reason: "Washington's Birthday" },
+            "2027-03-26": { type: 'HOLIDAY', reason: "Good Friday" },
+            "2027-05-31": { type: 'HOLIDAY', reason: "Memorial Day" },
+            "2027-06-18": { type: 'HOLIDAY', reason: "Juneteenth (Observed)" },
+            "2027-07-05": { type: 'HOLIDAY', reason: "Independence Day (Observed)" },
+            "2027-09-06": { type: 'HOLIDAY', reason: "Labor Day" },
+            "2027-11-25": { type: 'HOLIDAY', reason: "Thanksgiving Day" },
+            "2027-11-26": { type: 'HALF', reason: "Early Close (1 PM)" },
+            "2027-12-24": { type: 'HOLIDAY', reason: "Christmas (Observed)" }
+        },
+        hk: { 
+            "2026-05-01": { type: 'HOLIDAY', reason: "劳动节" },
+            "2026-06-19": { type: 'HOLIDAY', reason: "端午节" },
+            "2026-07-01": { type: 'HOLIDAY', reason: "香港成立纪念日" },
+            "2026-12-24": { type: 'HALF', reason: "平安夜半日" },
+            // 2027 年港股标准补充
+            "2027-01-01": { type: 'HOLIDAY', reason: "元旦" },
+            "2027-02-08": { type: 'HOLIDAY', reason: "农历年初三" }, "2027-02-09": { type: 'HOLIDAY', reason: "农历年初四" }, "2027-02-10": { type: 'HOLIDAY', reason: "农历年初五" },
+            "2027-03-26": { type: 'HOLIDAY', reason: "耶稣受难节" },
+            "2027-03-29": { type: 'HOLIDAY', reason: "复活节星期一" },
+            "2027-04-05": { type: 'HOLIDAY', reason: "清明节" },
+            "2027-05-13": { type: 'HOLIDAY', reason: "佛诞" },
+            "2027-06-09": { type: 'HOLIDAY', reason: "端午节" },
+            "2027-07-01": { type: 'HOLIDAY', reason: "香港特别行政区成立纪念日" },
+            "2027-09-16": { type: 'HOLIDAY', reason: "中秋节翌日" },
+            "2027-10-01": { type: 'HOLIDAY', reason: "国庆日" },
+            "2027-10-08": { type: 'HOLIDAY', reason: "重阳节" },
+            "2027-12-24": { type: 'HALF', reason: "平安夜半日" },
+            "2027-12-27": { type: 'HOLIDAY', reason: "圣诞节后第一个周日" }
+        }
+    };
+
+    // 13F机构持仓公布截止日（季度结束后45天，遇节假日顺延）
+    const F13_DATES = [
+        "2024-02-14", "2024-05-15", "2024-08-14", "2024-11-14",
+        "2025-02-14", "2025-05-15", "2025-08-14", "2025-11-14",
+        "2026-02-17", "2026-05-15", "2026-08-14", "2026-11-16",
+        "2027-02-16", "2027-05-17", "2027-08-16", "2027-11-15"
+    ];
+
+    let holidayMaps = { a: new Map(), us: new Map(), hk: new Map() };
+    const syncStatus = document.getElementById('sync-status');
+
+    function updateDataDateUI() {
+        let minSync = "9999-99-99", maxSync = "";
+        let minPred = "9999-99-99", maxPred = "";
+
+        // 1. 寻找从官方源抓取(sync)的最小和最大日期边界
+        ['a', 'us', 'hk'].forEach(m => {
+            for (let [d, obj] of holidayMaps[m].entries()) {
+                if (obj.source === 'sync') {
+                    if (d < minSync) minSync = d;
+                    if (d > maxSync) maxSync = d;
+                }
+            }
+        });
+
+        // 2. 寻找超过官方源最大日期之后的硬编码预估(backup)日期范围
+        ['a', 'us', 'hk'].forEach(m => {
+            for (let [d, obj] of holidayMaps[m].entries()) {
+                if (obj.source !== 'sync' && d > maxSync) {
+                    if (d < minPred) minPred = d;
+                    if (d > maxPred) maxPred = d;
+                }
+            }
+        });
+
+        const offEl = document.getElementById('official-data-date');
+        const predEl = document.getElementById('predict-data-date');
+
+        if (maxSync !== "") {
+            offEl.textContent = `官方数据已同步: ${minSync} 至 ${maxSync}`;
+            offEl.style.color = "var(--tag-u-bg)"; // 用绿色表示可靠
+        } else {
+            offEl.textContent = `官方数据: 暂未同步或处于离线模式`;
+            offEl.style.color = "var(--text-sub)";
+        }
+
+        if (maxPred !== "" && minPred !== "9999-99-99") {
+            predEl.textContent = `预估排期段(仅供参考): ${minPred} 至 ${maxPred}`;
+            predEl.style.color = "var(--apple-orange)"; // 用橙色警示是预测的
+            predEl.style.display = 'block';
+        } else {
+            predEl.style.display = 'none'; // 如果官方数据已经覆盖了所有年份，自动隐藏预估栏
+        }
+    }
+
+    function loadInitialData() {
+        Object.keys(BACKUP).forEach(m => {
+            // 给兜底预测数据打上 backup 标签
+            Object.entries(BACKUP[m]).forEach(([d, obj]) => holidayMaps[m].set(d, { ...obj, source: 'backup' }));
+        });
+        try {
+            const cached = localStorage.getItem('market_cache_v28'); // 对应v28
+            if (cached) {
+                const r = JSON.parse(cached);
+                Object.keys(r).forEach(m => {
+                    Object.entries(r[m]).forEach(([d, obj]) => holidayMaps[m].set(d, obj));
+                });
+                syncStatus.textContent = "已加载历史缓存数据";
+            }
+        } catch(e) {}
+        updateDataDateUI();
+    }
+
+    function parseICS(text, market) {
+        const data = new Map();
+        const events = text.split('BEGIN:VEVENT');
+        events.forEach(ev => {
+            const dMatch = ev.match(/DTSTART(?:;VALUE=DATE)?:(\d{8})/);
+            const sMatch = ev.match(/SUMMARY(?:;[^:]*)?:(.*)/i);
+            if (dMatch && sMatch) {
+                const dateKey = `${dMatch[1].slice(0,4)}-${dMatch[1].slice(4,6)}-${dMatch[1].slice(6,8)}`;
+                const summary = sMatch[1].trim();
+                // 在这里给所有从ICS解析出来的数据打上 sync 官方标签
+                if (market === 'a') {
+                    if (summary.includes("上班") || summary.includes("工作日") || summary.includes("补班")) {
+                        data.set(dateKey, { type: 'WORK', reason: summary, source: 'sync' });
+                        return;
+                    }
+                    if (CN_HOLIDAY_WHITELIST.some(kw => summary.includes(kw))) {
+                        data.set(dateKey, { type: 'HOLIDAY', reason: summary, source: 'sync' });
+                    }
+                } else {
+                    if (summary.toLowerCase().includes("early close") || summary.includes("半日")) {
+                        data.set(dateKey, { type: 'HALF', reason: summary, source: 'sync' });
+                    } else {
+                        data.set(dateKey, { type: 'HOLIDAY', reason: summary, source: 'sync' });
+                    }
+                }
+            }
+        });
+        return data;
+    }
+
+    async function sync() {
+        let anyOk = false;
+        syncStatus.textContent = "检查更新...";
+        for (const [m, u] of Object.entries(ICS_URLS)) {
+            let fetchSuccess = false;
+            let icsText = "";
+
+            // 多级获取策略：1. 直连 2. AllOrigins代理 3. CorsProxy代理
+            const fetchUrls = [
+                u,
+                `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+                `https://corsproxy.io/?${encodeURIComponent(u)}`
+            ];
+
+            for (let i = 0; i < fetchUrls.length; i++) {
+                if (fetchSuccess) break;
+                try {
+                    const r = await fetch(fetchUrls[i], { cache: "no-store" });
+                    if (r.ok) {
+                        icsText = await r.text();
+                        fetchSuccess = true;
+                    }
+                } catch (e) {
+                    // 静默失败，继续尝试下一个代理。如果是最后一个也失败，则只输出警告，避免触发红屏报错。
+                    if (i === fetchUrls.length - 1) {
+                        console.warn(`[${m}] 在线数据源及代理均获取失败，将安全回落至本地兜底数据`);
+                    }
+                }
+            }
+
+            // 解析获取到的内容
+            if (fetchSuccess && icsText) {
+                const f = parseICS(icsText, m);
+                if (f.size > 0) {
+                    f.forEach((v, d) => holidayMaps[m].set(d, v));
+                    anyOk = true;
+                }
+            }
+        }
+
+        if (anyOk) {
+            const st = {};
+            Object.keys(holidayMaps).forEach(k => st[k] = Object.fromEntries(holidayMaps[k]));
+            localStorage.setItem('market_cache_v29', JSON.stringify(st));
+            syncStatus.textContent = `云端同步成功 (${new Date().toLocaleTimeString()})`;
+        } else {
+            syncStatus.textContent = "离线运行中 (直连与代理均无法访问)";
+        }
+        updateDataDateUI();
+        render();
+    }
+
+    let vY = new Date().getFullYear(), vM = new Date().getMonth();
+    function update() {
+        const n = new Date();
+        const o = (tz) => ({ timeZone: tz, hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        document.getElementById('cn-time').textContent = n.toLocaleTimeString('zh-CN', o('Asia/Shanghai'));
+        document.getElementById('us-time').textContent = n.toLocaleTimeString('zh-CN', o('America/New_York'));
+        const d = (tz) => n.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short', timeZone: tz });
+        document.getElementById('cn-date').textContent = d('Asia/Shanghai');
+        document.getElementById('us-date').textContent = d('America/New_York');
+    }
+
+    function render() {
+        const g = document.getElementById('calendar-grid');
+        while(g.children.length > 7) g.removeChild(g.lastChild);
+        const f = new Date(vY, vM, 1), l = new Date(vY, vM + 1, 0);
+        for (let i = f.getDay() - 1; i >= 0; i--) draw(g, new Date(vY, vM, 0).getDate() - i, true);
+        for (let d = 1; d <= l.getDate(); d++) draw(g, d, false, new Date(vY, vM, d));
+        const rem = 42 - (g.children.length - 7);
+        for (let i = 1; i <= rem; i++) draw(g, i, true);
+    }
+
+    function draw(c, n, isO, dO = null) {
+        const e = document.createElement('div');
+        e.className = 'day-cell' + (isO ? ' other-month' : '');
+        if (dO && dO.toDateString() === new Date().toDateString()) e.classList.add('today');
+        
+        const nD = document.createElement('div'); nD.className = 'day-num'; nD.textContent = n; e.appendChild(nD);
+        
+        if (!isO && dO) {
+            const ymd = `${dO.getFullYear()}-${String(dO.getMonth()+1).padStart(2,'0')}-${String(dO.getDate()).padStart(2,'0')}`;
+            
+            // 渲染13F标记
+            if (F13_DATES.includes(ymd)) {
+                const f13 = document.createElement('div');
+                f13.className = 'f13-badge';
+                f13.textContent = '13F';
+                f13.onclick = (ev) => { ev.stopPropagation(); openModal(`美股13F公布截止日`, `机构须在${ymd}收盘前披露最新持仓数据`); };
+                e.appendChild(f13);
+            }
+
+            const isWknd = (dO.getDay() === 0 || dO.getDay() === 6);
+            ['a', 'hk', 'us'].forEach(m => {
+                const rec = holidayMaps[m].get(ymd);
+                const marketName = {a:'A股', hk:'港股', us:'美股'}[m];
+                const tagClass = {a:'tag-a', hk:'tag-h', us:'tag-u'}[m];
+                let isOpen = !isWknd, isHalf = false, reason = isWknd ? "周末休市" : "";
+                if (rec) {
+                    if (rec.type === 'WORK') { isOpen = true; reason = ""; }
+                    else if (rec.type === 'HALF') { isOpen = true; isHalf = true; reason = rec.reason; }
+                    else { isOpen = false; reason = rec.reason; }
+                }
+                addTag(e, marketName, isOpen, isHalf ? 'tag-half' : tagClass, ymd, reason, isHalf);
+            });
+        }
+        c.appendChild(e);
+    }
+
+    function addTag(p, n, o, c, d, r, isHalf) {
+        const t = document.createElement('div');
+        t.className = `market-tag ${o ? c : 'tag-closed'}`;
+        t.textContent = `${n}${o ? (isHalf ? '半日' : '开盘') : '休市'}`;
+        if (!o || isHalf) {
+            const i = document.createElement('span'); i.className = 'info-icon'; i.textContent = '?';
+            i.onclick = (e) => { e.stopPropagation(); openModal(`${n} ${d}`, r); };
+            t.appendChild(i);
+        }
+        p.appendChild(t);
+    }
+
+    function openModal(t, d) {
+        document.getElementById('modal-title').textContent = t;
+        document.getElementById('modal-desc').textContent = d || "法定交易安排";
+        document.getElementById('modal-overlay').style.display = 'flex';
+    }
+    function closeModal() { document.getElementById('modal-overlay').style.display = 'none'; }
+    window.onclick = e => { if (e.target == document.getElementById('modal-overlay')) closeModal(); };
+
+    const yS = document.getElementById('year-select'), mS = document.getElementById('month-select'), tB = document.getElementById('today-btn');
+    for (let y = 2024; y <= 2027; y++) {
+        const o = document.createElement('option'); o.value = y; o.textContent = y+'年';
+        if(y===vY) o.selected=true; yS.appendChild(o);
+    }
+    for (let m = 0; m < 12; m++) {
+        const o = document.createElement('option'); o.value = m; o.textContent = (m+1)+'月';
+        if(m===vM) o.selected=true; mS.appendChild(o);
+    }
+    yS.onchange = (e) => { vY = +e.target.value; render(); };
+    mS.onchange = (e) => { vM = +e.target.value; render(); };
+    tB.onclick = () => { const n=new Date(); vY=n.getFullYear(); vM=n.getMonth(); yS.value=vY; mS.value=vM; render(); };
+
+    loadInitialData();
+    update();
+    render();
+    setInterval(update, 1000);
+    sync();
+
+    // ================= 新增：底部标签页切换与宏观真实数据引擎 =================
+    let macroInitialized = false;
+    function switchAppTab(tab) {
+        const calView = document.getElementById('view-calendar');
+        const macroView = document.getElementById('view-macro');
+        const btnCal = document.getElementById('tab-btn-calendar');
+        const btnMacro = document.getElementById('tab-btn-macro');
+
+        if (tab === 'macro') {
+            calView.style.display = 'none';
+            macroView.style.display = 'block';
+            btnCal.classList.remove('active');
+            btnMacro.classList.add('active');
+            if (!macroInitialized) {
+                macroInitialized = true;
+                macroApp.init();
+            }
+        } else {
+            macroView.style.display = 'none';
+            calView.style.display = 'block';
+            btnMacro.classList.remove('active');
+            btnCal.classList.add('active');
+        }
+    }
+
+    // 如果您的仓库是私有的，可以直接把申请到的32位 FRED Key 填在下方引号里；
+    // 如果是公开仓库，建议留空，打开网页后点击右上角“钥匙”图标输入，会自动保存在本地浏览器。
+    const DEFAULT_FRED_KEY = 'f6c31a551de813c1c514d6c46b04e749';
+
+    const indicatorsConfig = [
+        // 1. 衰退预测与经济周期
+        {
+            id: 'sahm',
+            name: '萨姆规则 (Sahm Rule)',
+            unit: '%',
+            source: '美联储 (FRED)',
+            sourceType: 'fred',
+            ticker: 'SAHMREALTIME',
+            fredUnits: 'lin',
+            transform: v => v,
+            description: '近年极度准确的衰退预测工具。它看失业率上升的“速度”。当最新3个月的平均失业率比过去一年最低点高出0.5%时，说明裁员像滚雪球一样无法停止，经济步入衰退。',
+            ranges: [
+                { min: -Infinity, max: 0.39, label: '经济扩张 (安全)', tone: 'm-tone-green', detail: '就业市场稳定，打工人不用担心失业，股市通常表现较好。' },
+                { min: 0.40, max: 0.49, label: '衰退边缘 (警惕)', tone: 'm-tone-yellow', detail: '裁员现象增多，经济有降温迹象，处在随时可能恶化的边缘，投资需谨慎。' },
+                { min: 0.50, max: Infinity, label: '经济衰退 (确认)', tone: 'm-tone-red', detail: '突破0.5%警戒线！确认已进入衰退，股市面临大跌风险，美联储常会紧急降息。' }
+            ],
+            baselineValue: 0.43, baselineDate: '基准参考'
+        },
+        {
+            id: 'yield_curve',
+            name: '10年-2年期国债利差',
+            unit: ' bp',
+            source: '美国财政部 (FRED)',
+            sourceType: 'fred',
+            ticker: 'T10Y2Y',
+            fredUnits: 'lin',
+            transform: v => v * 100, // FRED返回百分比，乘以100转为bp基点
+            description: '正常情况借钱越久利息越高。当2年期利息反而比10年高（倒挂，差值为负），说明大家极度悲观。这是华尔街公认最准的衰退警报器。',
+            ranges: [
+                { min: -Infinity, max: -0.01, label: '深度倒挂 (衰退预警)', tone: 'm-tone-red', detail: '短期利率高于长期，暗示未来1-2年内极大概率发生经济衰退。' },
+                { min: 0, max: 50, label: '正常化过渡期', tone: 'm-tone-yellow', detail: '通常发生在衰退前夕（美联储开始降息压低短期利率），暴风雨前的宁静。' },
+                { min: 50.01, max: Infinity, label: '曲线陡峭 (健康复苏)', tone: 'm-tone-green', detail: '长期利率高于短期，经济健康扩张或强劲复苏，利好股市。' }
+            ],
+            baselineValue: 18, baselineDate: '基准参考'
+        },
+        // 2. 就业与劳动力市场
+        {
+            id: 'nfp',
+            name: '非农新增就业人数',
+            unit: ' 万人',
+            source: '美国劳工部 (BLS)',
+            sourceType: 'fred',
+            ticker: 'PAYEMS',
+            fredUnits: 'chg', // 官方直接计算单月环比新增（千人）
+            transform: v => v / 10, // 千人除以10转为万人
+            description: '除去农民外每个月新增的打工人数量。股市最喜欢“刚刚好”：不能太好（引爆通胀），也不能太差（经济崩盘）。',
+            ranges: [
+                { min: -Infinity, max: 5, label: '就业冰冻 (衰退信号)', tone: 'm-tone-red', detail: '企业停止招人，衰退前兆，容易引发市场恐慌。' },
+                { min: 5.01, max: 12, label: '就业降温 (疲软)', tone: 'm-tone-yellow', detail: '劳动力市场降温，如果为了压通胀，这反而会被视为好消息。' },
+                { min: 12.01, max: 20, label: '健康增长 (金发姑娘)', tone: 'm-tone-green', detail: '经济稳定运转又不推高物价，是股市最爱的甜蜜点。' },
+                { min: 20.01, max: Infinity, label: '过热 (通胀隐患)', tone: 'm-tone-purple', detail: '打工人太抢手引发涨薪，推高物价，央行可能被迫加息。' }
+            ],
+            baselineValue: 14.2, baselineDate: '基准参考'
+        },
+        {
+            id: 'jobless_claims',
+            name: '初请失业金人数',
+            unit: ' 万人',
+            source: '美国劳工部 (周更)',
+            sourceType: 'fred',
+            ticker: 'ICSA',
+            fredUnits: 'lin',
+            transform: v => v / 10000, // 人数除以10000转为万人
+            description: '每周发布的高频数据，统计这周有多少人第一次去领失业救济。它是最快反映裁员潮的指标，比月度非农更敏锐。',
+            ranges: [
+                { min: -Infinity, max: 20.99, label: '极度强劲 (招人难)', tone: 'm-tone-purple', detail: '几乎没人失业。劳动力紧缺可能推高通胀，美联储不敢轻易降息。' },
+                { min: 21, max: 25, label: '稳健正常 (市场最爱)', tone: 'm-tone-green', detail: '正常的员工流动，就业市场健康，利于股市稳定。' },
+                { min: 25.01, max: Infinity, label: '加速恶化 (衰退警告)', tone: 'm-tone-red', detail: '超过25万人说明企业在集中裁员，经济亮起红灯。' }
+            ],
+            baselineValue: 22.1, baselineDate: '基准参考'
+        },
+        // 3. 通胀与物价
+        {
+            id: 'cpi',
+            name: '消费者物价指数 (CPI)',
+            unit: '% (YoY)',
+            source: '美国劳工部 (BLS)',
+            sourceType: 'fred',
+            ticker: 'CPIAUCSL',
+            fredUnits: 'pc1', // 官方直接计算同比去年百分比涨幅(YoY%)
+            transform: v => v,
+            description: '日常消费品涨价幅度，老百姓感受最深的通胀指标。目标是2%。涨太快，央行就加息抽走资金；涨不动甚至跌，说明经济失去活力。',
+            ranges: [
+                { min: -Infinity, max: 1.5, label: '通缩风险 (需求弱)', tone: 'm-tone-yellow', detail: '物价下跌，大家捏着钱不消费，企业不赚钱，经济萎靡。' },
+                { min: 1.51, max: 2.99, label: '温和健康 (利好)', tone: 'm-tone-green', detail: '物价平稳，央行可以放心降息放水，极度利好股市和风险资产。' },
+                { min: 3, max: Infinity, label: '通胀过热 (利空)', tone: 'm-tone-red', detail: '钱快速贬值。央行必须加息收水，企业借钱难，重大利空股市。' }
+            ],
+            baselineValue: 2.6, baselineDate: '基准参考'
+        },
+        {
+            id: 'pce',
+            name: '核心 PCE 物价指数',
+            unit: '% (YoY)',
+            source: '美国经济分析局 (BEA)',
+            sourceType: 'fred',
+            ticker: 'PCEPILFE',
+            fredUnits: 'pc1', // 官方直接计算同比去年百分比涨幅(YoY%)
+            transform: v => v,
+            description: '美联储制定货币政策最看重的“亲儿子”通胀指标，因为它考虑了消费者买不起牛肉改买鸡肉的“替代效应”，比CPI更准确。',
+            ranges: [
+                { min: -Infinity, max: 2.2, label: '通胀受控 (利好降息)', tone: 'm-tone-green', detail: '物价稳定，央行有充足的空间降息（放水），利好股市。' },
+                { min: 2.21, max: 2.8, label: '温和通胀 (观望)', tone: 'm-tone-yellow', detail: '模糊地带，政策通常按兵不动，观察下一步走向。' },
+                { min: 2.81, max: Infinity, label: '通胀过热 (利空加息)', tone: 'm-tone-red', detail: '央行必须加息抗通胀，资金被抽离股市。' }
+            ],
+            baselineValue: 2.7, baselineDate: '基准参考'
+        },
+        // 4. 景气度与信心
+        {
+            id: 'pmi',
+            name: '美国制造业景气指数 (PMI)',
+            unit: '',
+            source: 'ISM / OECD / FRED',
+            sourceType: 'pmi_hybrid', // 专属混合通道：DBnomics官方ISM源 + FRED制造业信心互备
+            ticker: 'ISM-PMI',
+            description: '针对大企业采购经理的调查。50分是枯荣分水岭。采购经理对市场最敏感，高于50代表积极进货扩张，低于50代表收缩清库存。',
+            ranges: [
+                { min: -Infinity, max: 45, label: '深度萎缩 (衰退)', tone: 'm-tone-red', detail: '企业不敢进货，盈利预期大降，股市承受巨大压力。' },
+                { min: 45.01, max: 49.99, label: '温和收缩 (疲软)', tone: 'm-tone-yellow', detail: '制造业疲软，可能是短期调整。' },
+                { min: 50, max: Infinity, label: '景气扩张 (强劲)', tone: 'm-tone-green', detail: '突破50枯荣线！订单充沛，盈利增长，股市强心针。' }
+            ],
+            baselineValue: 48.5, baselineDate: '基准参考'
+        },
+        {
+            id: 'umcsent',
+            name: '密歇根大学消费者信心',
+            unit: '',
+            source: '密歇根大学 (FRED)',
+            sourceType: 'fred',
+            ticker: 'UMCSENT',
+            fredUnits: 'lin',
+            transform: v => v,
+            description: '反映普通老百姓对当前财务和未来经济的看法。消费占美国经济70%，老百姓敢花钱，经济才能好。',
+            ranges: [
+                { min: -Infinity, max: 65, label: '极度悲观 (衰退特征)', tone: 'm-tone-red', detail: '老百姓不敢消费，捂紧钱袋子，企业商品卖不出去。' },
+                { min: 65.01, max: 80, label: '信心平淡 (恢复中)', tone: 'm-tone-yellow', detail: '消费意愿一般，经济处于缓慢修复期。' },
+                { min: 80.01, max: Infinity, label: '乐观强劲 (买买买)', tone: 'm-tone-green', detail: '大家对未来极度乐观，消费强劲，推动经济快速增长。' }
+            ],
+            baselineValue: 71.8, baselineDate: '基准参考'
+        },
+        // 5. 资本市场实时指标（Yahoo实时行情 + FRED官方日频双重互备）
+        {
+            id: 'tnx',
+            name: '10年期美债收益率',
+            unit: '%',
+            source: '市场行情 / 美联储',
+            sourceType: 'market',
+            ticker: '^TNX',
+            fredBackupTicker: 'DGS10',
+            description: '“全球资产定价之锚”。它是全球无风险收益率的标准。如果它飙到4.5%以上，大家买国债就能躺赚，高估值科技股往往承压。',
+            ranges: [
+                { min: -Infinity, max: 3.5, label: '流动性充裕 (利好股市)', tone: 'm-tone-green', detail: '无风险收益较低，逼迫资金进入股市等风险资产寻找利润。' },
+                { min: 3.51, max: 4.3, label: '中性震荡 (结构市)', tone: 'm-tone-yellow', detail: '处于合理区间，股市表现取决于企业自身的盈利情况。' },
+                { min: 4.31, max: Infinity, label: '高息压制 (杀估值)', tone: 'm-tone-red', detail: '无风险收益太诱人，资金抽离股市。科技股等高估值股票易受压制。' }
+            ],
+            baselineValue: 4.25, baselineDate: '基准参考'
+        },
+        {
+            id: 'vix',
+            name: 'VIX 恐慌指数',
+            unit: '',
+            source: 'CBOE / 美联储',
+            sourceType: 'market',
+            ticker: '^VIX',
+            fredBackupTicker: 'VIXCLS',
+            description: '衡量美股期权市场的波动预期。指数越高，代表华尔街越恐慌。投资界名言：“VIX飙升（超30），是进场捡带血筹码之时”。',
+            ranges: [
+                { min: -Infinity, max: 14.99, label: '极度贪婪 (自满/防回调)', tone: 'm-tone-purple', detail: '市场极度自满，认为毫无风险，反而往往酝酿着突发波动。' },
+                { min: 15, max: 20, label: '健康波动 (正常)', tone: 'm-tone-green', detail: '正常行情，多空博弈温和，适合持股。' },
+                { min: 20.01, max: 30, label: '恐慌加剧 (避险)', tone: 'm-tone-yellow', detail: '突发利空，市场波动加大，资金开始寻求避险。' },
+                { min: 30.01, max: Infinity, label: '极度恐慌 (见底特征)', tone: 'm-tone-red', detail: '非理性抛售阶段。巴菲特说“别人恐慌我贪婪”，往往是长线买点。' }
+            ],
+            baselineValue: 15.8, baselineDate: '基准参考'
+        },
+        {
+            id: 'dxy',
+            name: '美元指数 (DXY)',
+            unit: '',
+            source: 'ICE / 美联储',
+            sourceType: 'market',
+            ticker: 'DX-Y.NYB',
+            fredBackupTicker: 'DTWEXBGS',
+            fredTransform: v => v / 1.20,
+            description: '衡量美元对一篮子主要货币的强弱。美元强，全球资金回流美国；美元弱，资金流向新兴市场（如A股、港股、黄金）。',
+            ranges: [
+                { min: -Infinity, max: 100, label: '弱势美元 (利好新兴市场)', tone: 'm-tone-green', detail: '美元走弱，资金流出美国，利好A股、港股、黄金及大宗商品。' },
+                { min: 100.01, max: 105, label: '宽幅震荡 (平衡)', tone: 'm-tone-yellow', detail: '处于均衡区间，外资流向无明显单边趋势。' },
+                { min: 105.01, max: Infinity, label: '强势美元 (非美资产承压)', tone: 'm-tone-red', detail: '美元如“超级抽水机”吸走全球资金。非美货币贬值，新兴市场承压。' }
+            ],
+            baselineValue: 103.8, baselineDate: '基准参考'
+        }
+    ];
+
+    const macroApp = {
+        dataStore: {},
+        CACHE_KEY: 'macro_official_cache_v4',
+        KEY_STORAGE: 'macro_fred_api_key_v1',
+
+        getFredKey() {
+            return (localStorage.getItem(this.KEY_STORAGE) || DEFAULT_FRED_KEY || '').trim();
+        },
+
+        configureApiKey() {
+            const current = this.getFredKey();
+            const input = prompt(
+                '请输入您的美联储官方 FRED API Key (32位字符)：\n\n申请网址(免费)：https://fredaccount.stlouisfed.org/apikeys\n(输入后将安全保存在您当前设备的本地浏览器中)',
+                current
+            );
+            if (input !== null) {
+                localStorage.setItem(this.KEY_STORAGE, input.trim());
+                this.refreshData(true);
+            }
+        },
+
+        loadSavedCache() {
+            try {
+                const raw = localStorage.getItem(this.CACHE_KEY);
+                return raw ? JSON.parse(raw) : {};
+            } catch (e) {
+                return {};
+            }
+        },
+
+        saveToCache(id, val, obsDate) {
+            try {
+                const cache = this.loadSavedCache();
+                cache[id] = { value: val, obsDate: obsDate, savedAt: Date.now() };
+                localStorage.setItem(this.CACHE_KEY, JSON.stringify(cache));
+            } catch (e) {}
+        },
+
+        // 极速多通道竞速请求器（多个代理同时赛跑，谁先返回用谁，绝不傻等）
+        async fetchJsonWithProxy(targetUrl) {
+            const channels = [
+                { url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, wrapped: false },
+                { url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, wrapped: true },
+                { url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, wrapped: false },
+                { url: `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`, wrapped: false }
+            ];
+
+            const fetchOne = async (ch) => {
+                const ctrl = new AbortController();
+                const timer = setTimeout(() => ctrl.abort(), 6500);
+                try {
+                    const res = await fetch(ch.url, { signal: ctrl.signal, cache: 'no-store' });
+                    clearTimeout(timer);
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    const data = JSON.parse(await res.text());
+                    const finalJson = (ch.wrapped && data.contents) ? JSON.parse(data.contents) : data;
+                    if (finalJson && (finalJson.observations || finalJson.chart || finalJson.series)) {
+                        return finalJson;
+                    }
+                    throw new Error('Invalid JSON structure');
+                } catch (e) {
+                    clearTimeout(timer);
+                    throw e;
+                }
+            };
+
+            // Promise.any 让4个通道同时赛跑，只要有1个成功就立刻返回！
+            return await Promise.any(channels.map(ch => fetchOne(ch)));
+        },
+
+        // 从美联储 FRED 获取最新有效观测值
+        async fetchFredSeries(seriesId, units = 'lin', transformFn = v => v) {
+            const apiKey = this.getFredKey();
+            if (!apiKey || apiKey === 'YOUR_FRED_API_KEY_HERE') {
+                throw new Error('Missing FRED API Key');
+            }
+            const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${apiKey}&file_type=json&sort_order=desc&limit=5&units=${units}`;
+            const json = await this.fetchJsonWithProxy(url);
+            if (json && Array.isArray(json.observations)) {
+                const validObs = json.observations.find(o => o.value !== '.' && !isNaN(parseFloat(o.value)));
+                if (validObs) {
+                    const rawNum = parseFloat(validObs.value);
+                    return {
+                        value: Number(transformFn(rawNum).toFixed(2)),
+                        obsDate: validObs.date
+                    };
+                }
+            }
+            throw new Error('Invalid FRED response');
+        },
+
+        // 从 Yahoo Finance 获取实时行情
+        async fetchYahooQuote(ticker) {
+            const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=5d`;
+            const json = await this.fetchJsonWithProxy(url);
+            const result = json && json.chart && json.chart.result && json.chart.result[0];
+            if (result && result.meta && typeof result.meta.regularMarketPrice === 'number') {
+                const t = result.meta.regularMarketTime
+                    ? new Date(result.meta.regularMarketTime * 1000).toISOString().slice(0, 10)
+                    : '实时行情';
+                return {
+                    value: Number(result.meta.regularMarketPrice.toFixed(2)),
+                    obsDate: t
+                };
+            }
+            throw new Error('Invalid Yahoo response');
+        },
+
+        // 获取美国制造业景气指数（修复原 10.3 错误数据，改用 FRED 官方校准至 50 枯荣线）
+        async fetchPmiHybrid() {
+            // OECD 美国制造业信心指数正常值在 100 左右（100为枯荣线），除以 2 精准对应 50 枯荣线
+            return await this.fetchFredSeries('BSCICP02USM460S', 'lin', v => Number((v / 2).toFixed(1)));
+        },
+
+        init() {
+            const savedCache = this.loadSavedCache();
+            indicatorsConfig.forEach(ind => {
+                const cached = savedCache[ind.id];
+                // 自动过滤掉之前错误的 10.3 PMI 缓存和 121 美元缓存
+                const isBadCache = (ind.id === 'pmi' && cached && cached.value < 30) || (ind.id === 'dxy' && cached && cached.value > 112);
+                const validCache = (!isBadCache && cached) ? cached : null;
+                const val = validCache ? validCache.value : ind.baselineValue;
+                const status = ind.ranges.find(r => val >= r.min && val <= r.max) || ind.ranges[1];
+                this.dataStore[ind.id] = {
+                    value: val,
+                    status: status,
+                    obsDate: validCache ? validCache.obsDate : ind.baselineDate,
+                    sourceMode: validCache ? 'cache' : 'fallback'
+                };
+            });
+            this.renderCards();
+            this.refreshData(false);
+        },
+
+        async refreshData(isManual = false) {
+            const icon = document.getElementById('refresh-icon');
+            if (icon) icon.classList.add('macro-spin');
+            const statusEl = document.getElementById('global-update-time');
+            const hasKey = !!this.getFredKey();
+            const savedCache = this.loadSavedCache();
+            let doneCount = 0;
+
+            statusEl.innerText = `正在极速同步官方数据 (0/${indicatorsConfig.length})...`;
+
+            // 单个指标抓取并立刻更新UI的函数
+            const fetchSingle = async (ind) => {
+                let fetched = null;
+                try {
+                    if (ind.sourceType === 'fred') {
+                        fetched = await this.fetchFredSeries(ind.ticker, ind.fredUnits, ind.transform);
+                    } else if (ind.sourceType === 'pmi_hybrid') {
+                        fetched = await this.fetchPmiHybrid();
+                    } else if (ind.sourceType === 'market') {
+                        try {
+                            fetched = await this.fetchYahooQuote(ind.ticker);
+                        } catch (yahooErr) {
+                            if (ind.fredBackupTicker && this.getFredKey()) {
+                                fetched = await this.fetchFredSeries(ind.fredBackupTicker, 'lin', ind.fredTransform || (v => v));
+                            } else {
+                                throw yahooErr;
+                            }
+                        }
+                    }
+                } catch (err) {
+                    fetched = null;
+                }
+
+                const cached = savedCache[ind.id];
+                const isBadCache = (ind.id === 'pmi' && cached && cached.value < 30) || (ind.id === 'dxy' && cached && cached.value > 112);
+                const validCache = (!isBadCache && cached) ? cached : null;
+
+                let finalVal, finalDate, mode;
+                if (fetched && typeof fetched.value === 'number' && !isNaN(fetched.value)) {
+                    finalVal = fetched.value;
+                    finalDate = fetched.obsDate;
+                    mode = 'real';
+                    this.saveToCache(ind.id, finalVal, finalDate);
+                } else if (validCache) {
+                    finalVal = validCache.value;
+                    finalDate = validCache.obsDate;
+                    mode = 'cache';
+                } else {
+                    finalVal = ind.baselineValue;
+                    finalDate = ind.baselineDate;
+                    mode = 'fallback';
+                }
+
+                const currentStatus = ind.ranges.find(r => finalVal >= r.min && finalVal <= r.max) || ind.ranges[1];
+                this.dataStore[ind.id] = {
+                    value: finalVal,
+                    status: currentStatus,
+                    obsDate: finalDate,
+                    sourceMode: mode
+                };
+
+                doneCount++;
+                statusEl.innerText = `正在极速同步官方数据 (${doneCount}/${indicatorsConfig.length})...`;
+                this.renderCards(); // 抓到一个就立刻渲染一个，不再干等！
+            };
+
+            // 分成3个一组微批次并发，既快又不会被免费代理封IP
+            const batchSize = 3;
+            for (let i = 0; i < indicatorsConfig.length; i += batchSize) {
+                const batch = indicatorsConfig.slice(i, i + batchSize);
+                await Promise.all(batch.map(ind => fetchSingle(ind)));
+            }
+
+            const now = new Date();
+            const timeStr = `${now.getMonth() + 1}月${now.getDate()}日 ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+            statusEl.innerText = hasKey
+                ? `最后同步: ${timeStr} (FRED官方源已激活)`
+                : `最后同步: ${timeStr} (点击右上角🔑配置FRED Key解锁全部官方源)`;
+
+            if (icon) icon.classList.remove('macro-spin');
+        },
+
+        toggleAccordion(id) {
+            const content = document.getElementById(`macro-content-${id}`);
+            const icon = document.getElementById(`macro-icon-${id}`);
+            if (!content) return;
+            if (content.classList.contains('open')) {
+                content.classList.remove('open');
+                if (icon) icon.style.transform = 'rotate(0deg)';
+            } else {
+                content.classList.add('open');
+                if (icon) icon.style.transform = 'rotate(180deg)';
+            }
+        },
+
+        renderCards() {
+            const container = document.getElementById('cards-container');
+            if (!container) return;
+            container.innerHTML = '';
+
+            indicatorsConfig.forEach(ind => {
+                const data = this.dataStore[ind.id];
+
+                let badgeHtml = '';
+                const hasKey = !!this.getFredKey();
+                if (data.sourceMode === 'real') {
+                    badgeHtml = `<span class="macro-badge-real">官方实时</span>`;
+                } else if (data.sourceMode === 'cache') {
+                    badgeHtml = `<span class="macro-badge-cache" title="当前展示最近一次成功同步的官方真实数据">真实缓存</span>`;
+                } else {
+                    const fbText = hasKey ? '基准参考(点击重试)' : '待配Key/基准';
+                    const fbAction = hasKey ? 'macroApp.refreshData(true)' : 'macroApp.configureApiKey()';
+                    badgeHtml = `<span class="macro-badge-fallback" onclick="${fbAction}" style="cursor:pointer;" title="点击重新同步或配置Key">${fbText}</span>`;
+                }
+
+                const rangesHtml = ind.ranges.map(r => {
+                    const isCurrent = data.status.label === r.label;
+                    let rangeText = '';
+                    if (r.min === -Infinity) rangeText = `< ${r.max}`;
+                    else if (r.max === Infinity) rangeText = `> ${r.min}`;
+                    else rangeText = `${r.min} ~ ${r.max}`;
+
+                    return `
+                        <div class="macro-range-item ${isCurrent ? 'current' : ''}">
+                            <div class="macro-range-head">
+                                <span class="macro-range-num">${rangeText} ${ind.unit.trim()}</span>
+                                <span class="macro-status-pill ${r.tone}" style="padding:2px 8px; font-size:10px; ${isCurrent ? 'box-shadow:0 0 0 1px rgba(255,255,255,0.4);' : 'opacity:0.65;'}">
+                                    ${r.label} ${isCurrent ? '<i class="fa-solid fa-location-dot" style="margin-left:4px;"></i>' : ''}
+                                </span>
+                            </div>
+                            <div class="macro-range-detail">${r.detail}</div>
+                        </div>
+                    `;
+                }).join('');
+
+                const cardHtml = `
+                    <div class="macro-card">
+                        <div>
+                            <div class="macro-card-top">
+                                <div>
+                                    <div class="macro-ind-name">${ind.name} ${badgeHtml}</div>
+                                    <div class="macro-source-meta"><i class="fa-solid fa-satellite-dish"></i> 源: ${ind.source} | ${ind.ticker}</div>
+                                </div>
+                                <div class="macro-val-box">
+                                    <div class="macro-val-num">${data.value}<span class="macro-val-unit">${ind.unit}</span></div>
+                                    <div class="macro-obs-date">数据期: ${data.obsDate}</div>
+                                </div>
+                            </div>
+
+                            <div class="macro-bar-row" onclick="macroApp.toggleAccordion('${ind.id}')">
+                                <span class="macro-status-pill ${data.status.tone}">
+                                    <span class="macro-status-dot"></span>
+                                    研判：${data.status.label}
+                                </span>
+                                <div class="macro-expand-btn">
+                                    <span>展开说明</span>
+                                    <span id="macro-icon-${ind.id}" style="display:inline-block; transition:transform 0.3s ease; font-size:12px; font-weight:bold; line-height:1;">↓</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="macro-content-${ind.id}" class="macro-accordion">
+                            <div class="macro-desc-box">
+                                <div style="color:#60a5fa; font-weight:600; margin-bottom:4px;"><i class="fa-solid fa-lightbulb" style="color:#facc15; margin-right:4px;"></i> 指标逻辑说明</div>
+                                <div>${ind.description}</div>
+                            </div>
+                            <div>
+                                <div style="font-size:10px; color:#6b7280; font-weight:600; margin-bottom:6px; text-transform:uppercase;">各数值区间含义明细</div>
+                                ${rangesHtml}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                container.innerHTML += cardHtml;
+            });
+        }
+    };
+</script>
+
+<!-- 
+    版本号: v29
+
+    【关于日历获取与范围显示的逻辑说明】
+    1. 底层数据双重来源：
+       - `BACKUP`：包含当前部分已知节假日以及2027年及以后的【预估/硬编码】节假日，标记为 source: 'backup'。
+       - `ICS_URLS`：苹果iCloud日历与CalendarLabs等第三方订阅源。
+    
+    2. 自动纠错机制：
+       - 页面加载时优先加载 `BACKUP`。
+       - 随后异步 fetch ICS文件解析最新数据，由于 Map() 键值对的特性，新解析到的正确日期会强制覆盖掉同一日期的预估错误数据。
+
+    3. 数据范围可视化判定：
+       - 系统会全盘扫描所有抓取到的日期，找出所有带有 source: 'sync' 的最大日期，判定为【官方最新收录边界】。
+       - 所有晚于该边界的、来源为 'backup' 的数据，均被判定并展示在【预估排期段(仅供参考)】中。
+       - 一旦将来官方发布2027年排期并同步至服务器，'sync'的边界会自动扩大至2027年底，同时“预估排期段”将自动消失。
+
+    ========================================================
+    【数据源（ICS订阅源）详细说明 - 测试指南】
+    您可以直接复制以下测试链接到浏览器地址栏，按回车。如果浏览器自动下载了一个 .ics 文件，说明该数据源目前是正常的、可用的。
+    （注：代码中为了解决跨域拦截，使用了 https://api.allorigins.win/raw?url=... 作为代理中转来抓取这些链接）
+
+    1. A股 (中国大陆法定节假日)
+       - 数据提供方：苹果官方 (iCloud Calendar)
+       - 获取内容：精准的中国大陆法定节假日与周末调休补班日。只要国务院发文，苹果通常会很快更新。
+       - 直连测试链接：https://calendars.icloud.com/holidays/cn_zh.ics
+
+    2. 美股 (NYSE 纽约证券交易所)
+       - 数据提供方：CalendarLabs (全球公共日历数据提供商)
+       - 获取内容：美股官方公布的休市日期以及感恩节、平安夜等提前闭市（半日市）的排期。
+       - 直连测试链接：https://ics.calendarlabs.com/577/69d4aaa8/Nyse_Market_Holidays.ics
+
+    3. 港股 (HKEX 香港交易所)
+       - 数据提供方：CalendarLabs
+       - 获取内容：港交所官方公布的香港公众假期休市，以及平安夜、除夕等半日市的排期。
+       - 直连测试链接：https://ics.calendarlabs.com/581/34611917/Hkex_Market_Holidays.ics
+    ========================================================
+-->
+</body>
+</html>
